@@ -1,0 +1,61 @@
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+
+last_update_id = None
+
+def get_updates():
+    global last_update_id
+    url = f"{BASE_URL}/getUpdates"
+    params = {"timeout": 5, "offset": last_update_id}
+    response = requests.get(url, params=params).json()
+    return response
+
+def send_message(chat_id, text):
+    url = f"{BASE_URL}/sendMessage"
+    data = {"chat_id": chat_id, "text": text}
+    requests.post(url, data=data)
+
+def get_system_info():
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return f"🧠 Sistema activo\n⏰ {now}"
+
+def handle_command(chat_id, text):
+    if text == "/start":
+        send_message(chat_id, "🤖 Control-Bot activo")
+
+    elif text == "/status":
+        send_message(chat_id, get_system_info())
+
+    elif text == "/logs":
+        try:
+            with open("logs/monitor.log", "r") as f:
+                lines = f.readlines()[-10:]
+                send_message(chat_id, "".join(lines))
+        except:
+            send_message(chat_id, "No hay logs disponibles")
+
+    else:
+        send_message(chat_id, "Comando no reconocido")
+
+def main():
+    global last_update_id
+
+    print("[+] Bot iniciado...")
+
+    while True:
+        updates = get_updates()
+
+        if "result" in updates:
+            for update in updates["result"]:
+                last_update_id = update["update_id"] + 1
+
+                if "message" in update:
+                    chat_id = update["message"]["chat"]["id"]
+                    text = update["message"].get("text", "")
+
+                    handle_command(chat_id, text)
+
+        time.sleep(2)
+
+if name == "main":
+    main()
