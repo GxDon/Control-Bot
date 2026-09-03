@@ -1,0 +1,251 @@
+#!/usr/bin/env python3
+
+import os
+import time
+from datetime import datetime
+
+import requests
+
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+AUTHORIZED_CHAT_ID = os.getenv("AUTHORIZED_CHAT_ID")
+
+POLL_TIMEOUT = 10
+LOG_FILE = "logs/monitor.log"
+
+
+if not BOT_TOKEN:
+    raise RuntimeError(
+        "Falta la variable de entorno BOT_TOKEN."
+    )
+
+
+BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+
+
+def get_updates(offset=None):
+    url = f"{BASE_URL}/getUpdates"
+
+    params = {
+        "timeout": POLL_TIMEOUT
+    }
+
+    if offset is not None:
+        params["offset"] = offset
+
+    try:
+        response = requests.get(
+            url,
+            params=params,
+            timeout=POLL_TIMEOUT + 5
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
+
+        if not data.get("ok"):
+            print("[!] Telegram devolvió un error.")
+            return {}
+
+        return data
+
+    except requests.RequestException as error:
+        print(f"[!] Error obteniendo actualizaciones: {error}")
+        return {}
+
+
+def send_message(chat_id, text):
+    url = f"{BASE_URL}/sendMessage"
+
+    data = {
+        "chat_id": chat_id,
+        "text": text
+    }
+
+    try:
+        response = requests.post(
+            url,
+            data=data,
+            timeout=10
+        )
+
+        response.raise_for_status()
+
+        result = response.json()
+
+        return result.get("ok", False)
+
+    except requests.RequestException as error:
+        print(f"[!] Error enviando mensaje: {error}")
+        return False
+
+
+def is_authorized(chat_id):
+    if not AUTHORIZED_CHAT_ID:
+        return False
+
+    return str(chat_id) == str(AUTHORIZED_CHAT_ID)
+
+
+def get_system_info():
+    now = datetime.now().strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+
+    return (
+        "🧠 Control-Bot activo\n"
+        f"⏰ {now}\n"
+        "🟢 Estado: funcionando"
+    )
+
+
+def get_logs():
+    if not os.path.isfile(LOG_FILE):
+        return "No hay logs disponibles."
+
+    try:
+        with open(
+            LOG_FILE,
+            "r",
+            encoding="utf-8",
+            errors="replace"
+        ) as file:
+
+            lines = file.readlines()
+
+        if not lines:
+            return "El archivo de logs está vacío."
+
+        last_lines = lines[-10:]
+
+        text = "".join(last_lines).strip()
+
+        if not text:
+            return "El archivo de logs está vacío."
+
+        return f"📋 Últimos registros:\n\n{text}"
+
+    except OSError as error:
+        print(f"[!] Error leyendo logs: {error}")
+        return "No se pudieron leer los logs."
+
+
+def handle_command(chat_id, text):
+    if not is_authorized(chat_id):
+        send_message(
+            chat_id,
+            "⛔ No estás autorizado para utilizar este bot."
+        )
+        return
+
+    text = text.strip()
+
+    if text == "/start":
+        send_message(
+            chat_id,
+            "🤖 Control-Bot activo."
+        )
+
+    elif text == "/status":
+        send_message(
+            chat_id,
+            get_system_info()
+        )
+
+    elif text == "/logs":
+        send_message(
+            chat_id,
+            get_logs()
+        )
+
+    else:
+        send_message(
+            chat_id,
+            "❓ Comando no reconocido.\n\n"
+            "Comandos disponibles:\n"
+            "/start\n"
+            "/status\n"
+            "/logs"
+        )
+
+
+def process_updates(updates, last_update_id):
+    if not updates or "result" not in updates:
+        return last_update_id
+
+    for update in updates["result"]:
+
+        update_id = update.get("update_id")
+
+        if update_id is not None:
+            last_update_id = update_id + 1
+
+        message = update.get("message")
+
+        if not message:
+            continue
+
+        chat = message.get("chat")
+
+        if not chat:
+            continue
+
+        chat_id = chat.get("id")
+
+        text = message.get("text", "")
+
+        if chat_id is None or not text:
+            continue
+
+        print(
+            f"[+] Mensaje recibido de {chat_id}: {text}"
+        )
+
+        handle_command(chat_id, text)
+
+    return last_update_id
+
+
+def main():
+    print("=" * 50)
+    print("              Control-Bot")
+    print("=" * 50)
+    print("[+] Bot iniciado.")
+    print("[+] Esperando mensajes...")
+
+    if not AUTHORIZED_CHAT_ID:
+        print(
+            "[!] ADVERTENCIA: AUTHORIZED_CHAT_ID "
+            "no está configurado."
+        )
+
+    last_update_id = None
+
+    while True:
+        try:
+            updates = get_updates(
+                offset=last_update_id
+            )
+
+            last_update_id = process_updates(
+                updates,
+                last_update_id
+            )
+
+            time.sleep(1)
+
+        except KeyboardInterrupt:
+            print("\n[+] Bot detenido.")
+            break
+
+        except Exception as error:
+            print(
+                f"[!] Error inesperado: {error}"
+            )
+
+            time.sleep(5)
+
+
+if __name__ == "__main__":
+    main()
